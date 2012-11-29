@@ -7,14 +7,14 @@ Net::SPDY::Session - Handle SPDY protocol connection
 =head1 ALPHA WARNING
 
 B<Please read carefully:> This is an ALPHA stage software.
-In particular this means that even though it probably won't kill your cat, 
-re-elect George W. Bush nor install Solaris 11 Express edition to your hard 
-drive, it is in active development, functionality is missing and no APIs are 
+In particular this means that even though it probably won't kill your cat,
+re-elect George W. Bush nor install Solaris 11 Express edition to your hard
+drive, it is in active development, functionality is missing and no APIs are
 stable.
 
 See F<TODO> file in the distribution to learn about missing and planned
-functionality. You are more than welcome to join the development and submit 
-patches with fixes or enhancements.  Bug reports are probably not very useful 
+functionality. You are more than welcome to join the development and submit
+patches with fixes or enhancements.  Bug reports are probably not very useful
 at this point.
 
 =head1 SYNOPSIS
@@ -76,7 +76,7 @@ L<IO::Handle> instance that is used for actual network communication.
 
 =item framer
 
-L<Net::SPDY::Framer> the protocol implementation on top of I<socket> and 
+L<Net::SPDY::Framer> the protocol implementation on top of I<socket> and
 I<compressor> it is coupled with. A new one is created upon session construction.
 
 =back
@@ -134,7 +134,7 @@ sub process_frame
 		$self->{framer}->write_syn_reply (
 			stream_id => $frame{stream_id},
 			flags => 0,
-			header_block => [
+			headers => [
 			      ':status' => '200 Ok',
 			      ':version' => 'HTTP/1.1',
 			      'content-length' => length($body),
@@ -156,6 +156,9 @@ sub process_frame
 		);
 	} elsif ($frame{type} == Net::SPDY::Framer::GOAWAY) {
 		$self->close (0);
+	} elsif ($frame{type} == Net::SPDY::Framer::HEADERS) {
+		# We should remember values gotten here for stream
+		warn 'Not implemented: Got headers frame'
 	} else {
 		die 'Unknown frame type '.$frame{type};
 	}

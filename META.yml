@@ -1,6 +1,6 @@
 ---
 name: Net-SPDY
-version: 0.1_1
+version: 0.1_2
 author:
   - 'Lubomir Rintel <lkundrak@v3.sk>'
 abstract: SPDY protocol implementation

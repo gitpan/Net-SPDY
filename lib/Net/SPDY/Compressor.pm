@@ -7,14 +7,14 @@ Net::SPDY::Compressor - SPDY header compressor
 =head1 ALPHA WARNING
 
 B<Please read carefully:> This is an ALPHA stage software.
-In particular this means that even though it probably won't kill your cat, 
-re-elect George W. Bush nor install Solaris 11 Express edition to your hard 
-drive, it is in active development, functionality is missing and no APIs are 
+In particular this means that even though it probably won't kill your cat,
+re-elect George W. Bush nor install Solaris 11 Express edition to your hard
+drive, it is in active development, functionality is missing and no APIs are
 stable.
 
 See F<TODO> file in the distribution to learn about missing and planned
-functionality. You are more than welcome to join the development and submit 
-patches with fixes or enhancements.  Bug reports are probably not very useful 
+functionality. You are more than welcome to join the development and submit
+patches with fixes or enhancements.  Bug reports are probably not very useful
 at this point.
 
 =head1 SYNOPSIS
@@ -29,8 +29,8 @@ at this point.
 B<Net::SPDY::Compressor> provides a convenient way to compress data
 in a way used by the SPDY protocol.
 
-This, in particular, means, that there are two separate streams (for input and 
-output), streams are synced after each message and the stream is initialized 
+This, in particular, means, that there are two separate streams (for input and
+output), streams are synced after each message and the stream is initialized
 with a dictionary of strings common to web communication.
 
 =cut

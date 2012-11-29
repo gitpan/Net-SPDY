@@ -2,13 +2,13 @@ This is Net::SPDY module.
 
 It provides a SPDY protocol implementation.
 
-Please read carefully: This is an ALPHA stage software.  In particular this 
-means that even though it probably won’t kill your cat, re-elect George W. Bush 
+Please read carefully: This is an ALPHA stage software.  In particular this
+means that even though it probably won’t kill your cat, re-elect George W. Bush
 nor install Solaris 11 Express edition to your hard drive, it is in
 active development, functionality is missing and no APIs are stable.
 
-See TODO file in the distribution to learn about missing and planned 
-functionality. You are more than welcome to join the development and submit 
+See TODO file in the distribution to learn about missing and planned
+functionality. You are more than welcome to join the development and submit
 patches with fixes or enhancements.  Bug reports are probably not very useful
 at this point.
 

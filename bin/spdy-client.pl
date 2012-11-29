@@ -7,14 +7,14 @@ spdy-client - Example Net::SPDY client
 =head1 ALPHA WARNING
 
 B<Please read carefully:> This is an ALPHA stage software.
-In particular this means that even though it probably won't kill your cat, 
-re-elect George W. Bush nor install Solaris 11 Express edition to your hard 
-drive, it is in active development, functionality is missing and no APIs are 
+In particular this means that even though it probably won't kill your cat,
+re-elect George W. Bush nor install Solaris 11 Express edition to your hard
+drive, it is in active development, functionality is missing and no APIs are
 stable.
 
 See F<TODO> file in the distribution to learn about missing and planned
-functionality. You are more than welcome to join the development and submit 
-patches with fixes or enhancements.  Bug reports are probably not very useful 
+functionality. You are more than welcome to join the development and submit
+patches with fixes or enhancements.  Bug reports are probably not very useful
 at this point.
 
 =head1 SYNOPSIS
@@ -53,14 +53,17 @@ $client->verify_hostname ($peer->host, 'http')
 my $session = new Net::SPDY::Session ($client);
 my $framer = $session->{framer};
 
+my $stream_id = 1;
 foreach my $path (@ARGV) {
-	$framer->write_syn_stream (
-		stream_id => 1,
+
+	$framer->write_frame (
+		type => Net::SPDY::Framer::SYN_STREAM,
+		stream_id => $stream_id,
 		associated_stream_id => 0,
 		priority => 2,
-		flags => Net::SPDY::Framer::FLAG_FIN,
+		flags => 0,
 		slot => 0,
-		header_block => [
+		headers => [
 			':method'	=> 'GET',
 			':scheme'	=> $peer->scheme,
 			':path'		=> $path,
@@ -68,21 +71,45 @@ foreach my $path (@ARGV) {
 			':host'		=> $peer->host.':'.$peer->port,
 		],
 	);
+
+	# Not implemented by GFE it seems
+	$framer->write_frame (
+		type	=> Net::SPDY::Framer::HEADERS,
+		flags => 0,
+		stream_id => $stream_id,
+		headers => [
+			'User-Agent'	=> 'spdy-client Net-Spdy/0.1',
+		],
+	);
+
+	$framer->write_frame (
+		control => 0,
+		data => '',
+		stream_id => $stream_id,
+		flags => Net::SPDY::Framer::FLAG_FIN,
+	);
+
+	$stream_id += 2;
 }
 
-$framer->write_settings (nv => [{
-	flags	=> 1,
-	value	=> 1000,
-	id	=> 4
-}]);
+$framer->write_frame (
+	type	=> Net::SPDY::Framer::SETTINGS,
+	id_values => [{
+		flags	=> 1,
+		value	=> 1000,
+		id	=> 4
+	}]
+);
 
-$framer->write_ping (
+$framer->write_frame (
+	type	=> Net::SPDY::Framer::PING,
 	data	=> 'abcd',
 );
 
-$framer->write_goaway (
-	last_good_stream_id	=> 0,
-	status			=> 0,
+$framer->write_frame (
+	type	=> Net::SPDY::Framer::GOAWAY,
+	last_good_stream_id => $stream_id,
+	status	=> 0,
 );
 
 while (my %frame = $framer->read_frame ()) {
