@@ -210,6 +210,8 @@ sub read_syn_stream
 	my %frame = @_;
 	my $buf;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
 
 	($frame{stream_id}, $frame{associated_stream_id},
 		$frame{priority}, $frame{slot}, $frame{headers}) =
@@ -263,6 +265,9 @@ sub read_syn_reply
 	my %frame = @_;
 	my $buf;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
+
 	($frame{stream_id}, $frame{headers}) =
 		unpack 'N a*', delete $frame{data};
 	$frame{headers} = {$self->unpack_nv ($frame{headers})};
@@ -304,8 +309,11 @@ sub read_rst_stream
 	my $self = shift;
 	my %frame = @_;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
 	die 'Mis-sized rst_stream frame'
 		unless $frame{length} == 8;
+
 	my $stream_id;
 	($stream_id, $frame{status}) = unpack 'N N', delete $frame{data};
 	$frame{stream_id} = ($stream_id & 0x7fffffff);
@@ -360,6 +368,9 @@ sub read_settings
 	my %frame = @_;
 	my $buf;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
+
 	($frame{entries}, $frame{data}) =
 		unpack 'N a*', $frame{data};
 	$frame{id_values} = [];
@@ -411,6 +422,8 @@ sub read_ping
 	my $self = shift;
 	my %frame = @_;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
 	die 'Mis-sized ping frame'
 		unless $frame{length} == 4;
 
@@ -451,8 +464,11 @@ sub read_goaway
 	my $self = shift;
 	my %frame = @_;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
 	die 'Mis-sized goaway frame'
 		unless $frame{length} == 8;
+
 	my $last_good_stream_id;
 	($last_good_stream_id, $frame{status}) = unpack 'N N', delete $frame{data};
 	$frame{last_good_stream_id} = ($last_good_stream_id & 0x7fffffff);
@@ -498,12 +514,117 @@ sub read_headers
 	my %frame = @_;
 	my $buf;
 
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
 
 	($frame{stream_id}, $frame{headers}) =
 		unpack 'N a*', delete $frame{data};
 
 	$frame{stream_id} &= 0x7fffffff;
 	$frame{headers} = {$self->unpack_nv ($frame{headers})};
+
+	return %frame;
+}
+
+=item WINDOW_UPDATE
+
+  (
+      # Common to control frames
+      control     => 1,           # Input only
+      version     => 3,           # Input only
+      type        => Net::SPDY::Framer::WINDOW_UPDATE
+      flags       => <flags>,     # Defaults to 0
+      length      => <length>,    # Input only
+
+      # Specific for WINDOW_UPDATE
+      stream_id   => <stream_id>,
+      delta_window_size => <delta_window_size>,
+  )
+
+=cut
+
+sub write_window_update
+{
+	my $self = shift;
+	my %frame = @_;
+
+	$frame{data} = pack 'N N',
+		($frame{stream_id} & 0x7fffffff),
+		($frame{delta_window_size} & 0x7fffffff);
+
+	return %frame;
+}
+
+sub read_window_update
+{
+	my $self = shift;
+	my %frame = @_;
+
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 3;
+	die 'Mis-sized window_update frame'
+		unless $frame{length} == 8;
+
+	my ($stream_id, $delta_window_size) = unpack 'N N', delete $frame{data};
+	$frame{stream_id} = ($stream_id & 0x7fffffff);
+	$frame{delta_window_size} = ($delta_window_size & 0x7fffffff);
+
+	return %frame;
+}
+
+=item CREDENTIAL
+
+  (
+      # Common to control frames
+      control     => 1,           # Input only
+      version     => 1,           # Input only
+      type        => Net::SPDY::Framer::CREDENTIAL
+      flags       => <flags>,     # Defaults to 0
+      length      => <length>,    # Input only
+
+      # Specific for CREDENTIAL
+      slot        => <slot>,
+      proof       => <proof>,
+      certificates => [ <certificate>, ... ],
+  )
+
+=cut
+
+sub write_credential
+{
+	my $self = shift;
+	my %frame = @_;
+
+	$frame{data} = pack 'n N a*', $frame{slot},
+		length $frame{proof}, $frame{proof};
+
+	foreach my $credential (@{$frame{credentials}}) {
+		$frame{data} .= pack 'N a*', length $credential,
+			$credential;
+	}
+
+	return %frame;
+}
+
+sub read_credential
+{
+	my $self = shift;
+	my %frame = @_;
+
+	die 'Bad version '.$frame{version}
+		unless $frame{version} == 1;
+
+        my $len;
+	($frame{slot}, $len, $frame{data}) = unpack 'n N a*', $frame{data};
+	($frame{proof}, $frame{data}) = unpack "a$len a*", $frame{data};
+	$frame{credentials} = [];
+
+	while ($frame{data}) {
+		my $credential;
+		($len, $frame{data}) = unpack 'N a*', $frame{data};
+		($credential, $frame{data}) = unpack "a$len a*", $frame{data};
+		push @{$frame{credentials}}, $credential;
+	}
 
 	return %frame;
 }
@@ -554,6 +675,8 @@ sub write_frame
 			%frame = $self->write_goaway (%frame);
 		} elsif ($frame{type} == HEADERS) {
 			%frame = $self->write_headers (%frame);
+		} elsif ($frame{type} == WINDOW_UPDATE) {
+			%frame = $self->write_window_update (%frame);
 		} else {
 			die 'Not implemented: Unsupported frame '.$frame{type};
 		}
@@ -608,7 +731,6 @@ sub read_frame
 	if ($frame{control}) {
 		$frame{version}	= ($head & 0x7fff0000) >> 16;
 		$frame{type} = ($head & 0x0000ffff);
-		die 'Bad version '.$frame{version} unless $frame{version} == 3;
 	} else {
 		$frame{stream_id} = ($head & 0x7fffffff);
 	};
@@ -641,6 +763,8 @@ sub read_frame
 			%frame = $self->read_goaway (%frame);
 		} elsif ($frame{type} == HEADERS) {
 			%frame = $self->read_headers (%frame);
+		} elsif ($frame{type} == WINDOW_UPDATE) {
+			%frame = $self->read_window_update (%frame);
 		} else {
 			# We SHOULD ignore these, if we did implement everything
 			# that we MUST implement.
