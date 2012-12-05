@@ -28,7 +28,7 @@ at this point.
 
   $framer->write_frame(
         type => Net::SPDY::Framer::PING,
-        data => 'chuj',
+        data => 0x706c6c6d,
   );
   while (my %frame = $framer->read_frame) {
         last if $frame{control} and $frame{type} eq Net::SPDY::Framer::PING;
@@ -177,14 +177,14 @@ with defaults.
       priority    => <priority>,
       slot        => <slot>,
 
-      headers     =>  {
+      headers     =>  [
           ':version'  => <version>,   # E.g. 'HTTP/1.1'
           ':scheme'   => <scheme>,    # E.g. 'https'
           ':host'     => <host>,      # E.g. 'example.net:443',
           ':method'   => <method>,    # E.g. 'GET', 'HEAD',...
           ':path'     => <path>,      # E.g. '/something',
           ... # HTTP headers, e.g. Accept => 'text/plain'
-      },
+      ],
   )
 
 =cut
@@ -219,9 +219,9 @@ sub read_syn_stream
 
 	$frame{stream_id} &= 0x7fffffff;
 	$frame{associated_stream_id} &= 0x7fffffff;
-	$frame{priority} = ($frame{priority} & 0x07) << 5;
+	$frame{priority} = ($frame{priority} & 0xe0) >> 5;
 	$frame{slot} &= 0xff;
-	$frame{headers} = {$self->unpack_nv ($frame{headers})};
+	$frame{headers} = [$self->unpack_nv ($frame{headers})];
 
 	return %frame;
 }
@@ -239,11 +239,11 @@ sub read_syn_stream
       # Specific for SYN_REPLY
       stream_id   => <stream_id>,
 
-      headers     =>  {
+      headers     =>  [
           ':version'  => <version>,   # E.g. 'HTTP/1.1'
           ':status'   => <status>,    # E.g. '500 Front Fell Off',
           ... # HTTP headers, e.g. 'Content-Type' => 'text/plain'
-      },
+      ],
   )
 =cut
 
@@ -270,7 +270,7 @@ sub read_syn_reply
 
 	($frame{stream_id}, $frame{headers}) =
 		unpack 'N a*', delete $frame{data};
-	$frame{headers} = {$self->unpack_nv ($frame{headers})};
+	$frame{headers} = [$self->unpack_nv ($frame{headers})];
 
 	return %frame;
 }
@@ -354,7 +354,7 @@ sub write_settings
 	$frame{data} = pack 'N', scalar @{$frame{id_values}};
 	foreach my $entry (@{$frame{id_values}}) {
 		$frame{data} .= pack 'N',
-			($entry->{flags} & 0xff000000) << 24 |
+			($entry->{flags} & 0x000000ff) << 24 |
 			($entry->{id} & 0x00ffffff);
 		$frame{data} .= pack 'N', $entry->{value};
 	}
@@ -400,7 +400,7 @@ sub read_settings
       length      => <length>,    # Input only
 
       # Specific for PING
-      data        => data,        # E.g. 'abcd'
+      id          => <id>,        # E.g. 0x706c6c6d
   )
 
 
@@ -411,8 +411,7 @@ sub write_ping
 	my $self = shift;
 	my %frame = @_;
 
-	die 'Ping payload has to be 4 characters'
-		unless length $frame{data} == 4;
+	$frame{data} = pack 'N', $frame{id};
 
 	return %frame;
 }
@@ -426,6 +425,8 @@ sub read_ping
 		unless $frame{version} == 3;
 	die 'Mis-sized ping frame'
 		unless $frame{length} == 4;
+
+	$frame{id} = unpack 'N', delete $frame{data};
 
 	return %frame;
 }
@@ -489,9 +490,9 @@ sub read_goaway
       # Specific for HEADERS
       stream_id   => <stream_id>,
 
-      headers     =>  {
+      headers     =>  [
           ... # HTTP headers, e.g. Accept => 'text/plain'
-      },
+      ],
   )
 
 =cut
@@ -521,7 +522,7 @@ sub read_headers
 		unpack 'N a*', delete $frame{data};
 
 	$frame{stream_id} &= 0x7fffffff;
-	$frame{headers} = {$self->unpack_nv ($frame{headers})};
+	$frame{headers} = [$self->unpack_nv ($frame{headers})];
 
 	return %frame;
 }
@@ -595,10 +596,11 @@ sub write_credential
 	my $self = shift;
 	my %frame = @_;
 
+	$frame{version} ||= 1;
 	$frame{data} = pack 'n N a*', $frame{slot},
 		length $frame{proof}, $frame{proof};
 
-	foreach my $credential (@{$frame{credentials}}) {
+	foreach my $credential (@{$frame{certificates}}) {
 		$frame{data} .= pack 'N a*', length $credential,
 			$credential;
 	}
@@ -617,13 +619,13 @@ sub read_credential
         my $len;
 	($frame{slot}, $len, $frame{data}) = unpack 'n N a*', $frame{data};
 	($frame{proof}, $frame{data}) = unpack "a$len a*", $frame{data};
-	$frame{credentials} = [];
+	$frame{certificates} = [];
 
 	while ($frame{data}) {
 		my $credential;
 		($len, $frame{data}) = unpack 'N a*', $frame{data};
 		($credential, $frame{data}) = unpack "a$len a*", $frame{data};
-		push @{$frame{credentials}}, $credential;
+		push @{$frame{certificates}}, $credential;
 	}
 
 	return %frame;
@@ -667,6 +669,8 @@ sub write_frame
 			%frame = $self->write_syn_stream (%frame);
 		} elsif ($frame{type} == SYN_REPLY) {
 			%frame = $self->write_syn_reply (%frame);
+		} elsif ($frame{type} == RST_STREAM) {
+			%frame = $self->write_rst_stream (%frame);
 		} elsif ($frame{type} == SETTINGS) {
 			%frame = $self->write_settings (%frame);
 		} elsif ($frame{type} == PING) {
@@ -677,6 +681,8 @@ sub write_frame
 			%frame = $self->write_headers (%frame);
 		} elsif ($frame{type} == WINDOW_UPDATE) {
 			%frame = $self->write_window_update (%frame);
+		} elsif ($frame{type} == CREDENTIAL) {
+			%frame = $self->write_credential (%frame);
 		} else {
 			die 'Not implemented: Unsupported frame '.$frame{type};
 		}
@@ -688,22 +694,23 @@ sub write_frame
 
 	$frame{length} = length $frame{data};
 
-	$self->{socket}->write (pack 'N', ($frame{control} ? (
+	$self->{socket}->print (pack 'N', ($frame{control} ? (
 		$frame{control} << 31 |
 		$frame{version} << 16 |
 		$frame{type}
 	) : (
-		$frame{control} << 31 |
 		$frame{stream_id}
 	))) or die 'Short write';
 
-	$self->{socket}->write (pack 'N', (
+	$self->{socket}->print (pack 'N', (
 		$frame{flags} << 24 |
 		$frame{length}
 	)) or die 'Short write';
 
-	$self->{socket}->write ($frame{data}) == $frame{length}
-		or die 'Short write';
+	if ($frame{data}) {
+		$self->{socket}->print ($frame{data})
+			or die "Short write $! $self->{socket}";
+	}
 
 	return %frame;
 }
@@ -755,6 +762,8 @@ sub read_frame
 			%frame = $self->read_syn_stream (%frame);
 		} elsif ($frame{type} == SYN_REPLY) {
 			%frame = $self->read_syn_reply (%frame);
+		} elsif ($frame{type} == RST_STREAM) {
+			%frame = $self->read_rst_stream (%frame);
 		} elsif ($frame{type} == SETTINGS) {
 			%frame = $self->read_settings (%frame);
 		} elsif ($frame{type} == PING) {
@@ -765,6 +774,8 @@ sub read_frame
 			%frame = $self->read_headers (%frame);
 		} elsif ($frame{type} == WINDOW_UPDATE) {
 			%frame = $self->read_window_update (%frame);
+		} elsif ($frame{type} == CREDENTIAL) {
+			%frame = $self->read_credential (%frame);
 		} else {
 			# We SHOULD ignore these, if we did implement everything
 			# that we MUST implement.
