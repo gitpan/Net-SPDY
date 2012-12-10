@@ -1,6 +1,6 @@
 ---
 name: Net-SPDY
-version: 0.1_4
+version: 0.1_5
 author:
   - 'Lubomir Rintel <lkundrak@v3.sk>'
 abstract: SPDY protocol client and server implementation
@@ -10,6 +10,7 @@ resources:
   license: http://dev.perl.org/licenses/
   repository: https://github.com/lkundrak/net-spdy
 build_requires:
+  Socket: 0
   Test::Deep: 0
   Test::Pod: 0
 requires:

@@ -47,6 +47,8 @@ use warnings;
 
 our $VERSION = '0.1';
 
+use Errno qw/EINTR/;
+
 =head1 CONSTANTS
 
 For the actual values refer to the protocol specification.
@@ -73,19 +75,52 @@ use constant {
 	CREDENTIAL	=> 10,
 };
 
-=item Flags
+=item Frame flags
 
-C<FLAG_FIN>, C<FLAG_UNIDIRECTIONAL>.
-
-=back
+C<FLAG_FIN>, C<FLAG_UNIDIRECTIONAL>, C<FLAG_SETTINGS_CLEAR_SETTINGS>.
 
 =cut
 
-# For SYN_STREAM, SYN_RESPONSE
 use constant {
+	# For SYN_STREAM, SYN_RESPONSE, Data
 	FLAG_FIN	=> 0x01,
 	FLAG_UNIDIRECTIONAL => 0x02,
+	# For SETTINGS
+	FLAG_SETTINGS_CLEAR_SETTINGS => 0x01,
 };
+
+=item SETTINGS flags
+
+C<FLAG_SETTINGS_PERSIST_VALUE>, C<FLAG_SETTINGS_PERSISTED>.
+
+=cut
+
+use constant {
+	FLAG_SETTINGS_PERSIST_VALUE => 0x1,
+	FLAG_SETTINGS_PERSISTED	=> 0x2,
+};
+
+=item SETTINGS values
+
+C<SETTINGS_UPLOAD_BANDWIDTH>, C<SETTINGS_DOWNLOAD_BANDWIDTH>,
+C<SETTINGS_ROUND_TRIP_TIME>, C<SETTINGS_MAX_CONCURRENT_STREAMS>,
+C<SETTINGS_CURRENT_CWND>, C<SETTINGS_DOWNLOAD_RETRANS_RATE>,
+C<SETTINGS_INITIAL_WINDOW_SIZE>, C<SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE>.
+
+=cut
+
+use constant {
+	SETTINGS_UPLOAD_BANDWIDTH => 1,
+	SETTINGS_DOWNLOAD_BANDWIDTH => 2,
+	SETTINGS_ROUND_TRIP_TIME => 3,
+	SETTINGS_MAX_CONCURRENT_STREAMS => 4,
+	SETTINGS_CURRENT_CWND => 5,
+	SETTINGS_DOWNLOAD_RETRANS_RATE => 6,
+	SETTINGS_INITIAL_WINDOW_SIZE => 7,
+	SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE	=> 8,
+};
+
+=back
 
 =head1 PROPERTIES
 
@@ -110,6 +145,7 @@ sub pack_nv
 	while (my $name = shift) {
 		my $value = shift;
 		die 'No value' unless defined $value;
+		$value = join "\x00", @$value if ref $value and ref $value eq 'ARRAY';
 		$name_value .= pack 'N a* N a*',
 			map { length $_ => $_ }
 			(lc ($name) => $value);
@@ -138,6 +174,9 @@ sub unpack_nv
 		($len, $name_value) = unpack 'N a*', $name_value;
 		($value, $name_value) = unpack "a$len a*", $name_value;
 
+		my @values = split /\x00/, $value;
+		$value = [ @values ] if scalar @values > 1;
+
 		push @retval, $name => $value;
 
 	}
@@ -146,6 +185,25 @@ sub unpack_nv
 }
 
 =back
+
+=cut
+
+sub reliable_read
+{
+	my $handle = shift;
+	my $length = shift;
+
+	my $buf = '';
+	while (length $buf < $length) {
+		my $ret = $handle->read ($buf, $length - length $buf,
+			length $buf);
+		next if $!{EINTR};
+		die 'Read error '.$! unless defined $ret;
+		return '' if $ret == 0;
+	}
+
+	return $buf;
+}
 
 =head1 FRAME FORMATS
 
@@ -724,14 +782,12 @@ Reads frame from the network socket and returns it deserialized.
 sub read_frame
 {
 	my $self = shift;
-	my $buf;
 
 	# First word of the frame header
 	return () unless $self->{socket};
-	my $ret = $self->{socket}->read ($buf, 4);
-	die 'Read error '.$! unless defined $ret;
-	return () if $ret == 0;
-	die 'Short read' if $ret != 4;
+	my $buf = reliable_read ($self->{socket}, 4);
+	die 'Short read' unless defined $buf;
+	return () if $buf eq '';
 	my $head = unpack 'N', $buf;
 	my %frame = (control => ($head & 0x80000000) >> 31);
 
@@ -743,7 +799,7 @@ sub read_frame
 	};
 
 	# Common parts of the header
-	$self->{socket}->read ($buf, 4) == 4 or die 'Read error';
+	$buf = reliable_read ($self->{socket}, 4) or die 'Read error';
 	my $body = unpack 'N', $buf;
 	$frame{flags} = ($body & 0xff000000) >> 24;
 	$frame{length} = ($body & 0x00ffffff);
@@ -753,7 +809,7 @@ sub read_frame
 		$frame{data} = '';
 		return %frame;
 	}
-	$self->{socket}->read ($frame{data}, $frame{length})
+	$frame{data} = reliable_read ($self->{socket}, $frame{length})
 		or die 'Read error';
 
 	# Grok the payload
